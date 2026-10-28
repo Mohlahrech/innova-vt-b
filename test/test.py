@@ -5,8 +5,8 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles
 
-# Cycles per UART bit: prescale * 8, with prescale = 50 MHz / (115200 * 8) = 54.
-BIT_CYCLES = 54 * 8
+# Cycles per UART bit: prescale * 8, with prescale = 100 MHz / (115200 * 8) = 108.
+BIT_CYCLES = 108 * 8
 
 
 async def send_byte(dut, value):
@@ -30,7 +30,7 @@ async def duty_of(dut, bit, cycles=512):
 async def test_project(dut):
     dut._log.info("Start")
 
-    clock = Clock(dut.clk, 20, unit="ns")
+    clock = Clock(dut.clk, 10, unit="ns")
     cocotb.start_soon(clock.start())
 
     dut.ena.value = 1

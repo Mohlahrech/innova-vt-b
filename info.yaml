@@ -5,7 +5,7 @@ project:
   discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
   description:  "15-channel PWM LED driver set over a 115200-baud UART"      # One line description of what your project does
   language:     "Verilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
-  clock_hz:     50000000       # Clock frequency in Hz (or 0 if not applicable)
+  clock_hz:     100000000       # Clock frequency in Hz (or 0 if not applicable)
 
   # How many tiles your design occupies? A single tile is about 167x108 uM.
   tiles: "1x2"          # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
@@ -29,31 +29,31 @@ pinout:
   ui[0]: ""
   ui[1]: ""
   ui[2]: ""
-  ui[3]: ""
+  ui[3]: "RX"
   ui[4]: ""
   ui[5]: ""
   ui[6]: ""
   ui[7]: ""
 
   # Outputs
-  uo[0]: ""
-  uo[1]: ""
-  uo[2]: ""
-  uo[3]: ""
-  uo[4]: ""
-  uo[5]: ""
-  uo[6]: ""
-  uo[7]: ""
+  uo[0]: "PWM0"
+  uo[1]: "PWM1"
+  uo[2]: "PWM2"
+  uo[3]: "PWM3"
+  uo[4]: "PWM4"
+  uo[5]: "PWM5"
+  uo[6]: "PWM6"
+  uo[7]: "PWM7"
 
   # Bidirectional pins
-  uio[0]: ""
-  uio[1]: ""
-  uio[2]: ""
-  uio[3]: ""
-  uio[4]: ""
-  uio[5]: ""
-  uio[6]: ""
-  uio[7]: ""
+  uio[0]: "TX"
+  uio[1]: "PWM8"
+  uio[2]: "PWM9"
+  uio[3]: "PWM10"
+  uio[4]: "PWM11"
+  uio[5]: "PWM12"
+  uio[6]: "PWM13"
+  uio[7]: "PWM14"
 
 # Do not change!
 yaml_version: 6

@@ -22,7 +22,7 @@ module tt_um_innova_pwm (
     input  wire       rst_n     // reset_n - low to reset
 );
 
-  localparam CLK_HZ   = 50_000_000;
+  localparam CLK_HZ   = 100_000_000;
   localparam BAUD     = 115_200;
   localparam [15:0] PRESCALE = CLK_HZ / (BAUD * 8);
   localparam NUM_CH   = 15;
@@ -56,6 +56,7 @@ module tt_um_innova_pwm (
   reg [3:0] sel;
   reg       have_sel;
   reg [7:0] counter;
+  reg       pwm_tick;  // counter steps every other clock, so PWM stays at 100 MHz / 512 = 195 kHz
 
   integer i;
   always @(posedge clk) begin
@@ -63,9 +64,11 @@ module tt_um_innova_pwm (
       have_sel <= 1'b0;
       sel      <= 4'd0;
       counter  <= 8'd0;
+      pwm_tick <= 1'b0;
       for (i = 0; i < NUM_CH; i = i + 1) duty[i] <= 8'd0;
     end else begin
-      counter <= counter + 8'd1;
+      pwm_tick <= !pwm_tick;
+      if (pwm_tick) counter <= counter + 8'd1;
       if (rx_valid) begin
         if (rx_data[7]) begin
           sel      <= rx_data[3:0];
