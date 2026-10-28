@@ -29,7 +29,10 @@ module tt_um_innova_pwm (
   // Wide enough for the longest bit period (PRESCALE * 8 clocks), and no wider.
   localparam PRESCALE_WIDTH = $clog2(PRESCALE * 8 + 1);
 
-  wire rst = !rst_n;
+  // rst_n is registered once so the ~190 synchronous resets load a flop, not the
+  // input pad: reset takes effect, and releases, one clock later.
+  reg rst;
+  always @(posedge clk) rst <= !rst_n;
 
   wire [7:0] rx_data;
   wire       rx_valid;
@@ -94,8 +97,13 @@ module tt_um_innova_pwm (
     end
   endgenerate
 
-  assign uo_out  = pwm[7:0];
-  assign uio_out = {pwm[14:8], txd};
+  // Registered so the comparators do not eat into the output-pad budget:
+  // every PWM edge is one clock (10 ns) later than the comparison.
+  reg [NUM_CH-1:0] pwm_q;
+  always @(posedge clk) pwm_q <= pwm;  // zero in reset: duty is cleared
+
+  assign uo_out  = pwm_q[7:0];
+  assign uio_out = {pwm_q[14:8], txd};
   assign uio_oe  = 8'hFF;
 
   // List all unused inputs to prevent warnings
