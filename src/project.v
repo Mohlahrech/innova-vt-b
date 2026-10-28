@@ -30,13 +30,13 @@ module tt_um_innova_pwm (
   localparam PRESCALE_WIDTH = $clog2(PRESCALE * 8 + 1);
 
   // rst_n is registered so the synchronous resets load flops, not the input
-  // pad: reset takes effect, and releases, one clock later. Two identical
-  // copies split the loads; keep on the always block stops synthesis merging them.
-  // rst[0]: UART, rst[1]: channel select, PWM counter and duty.
-  wire [1:0] rst;
+  // pad: reset takes effect, and releases, one clock later. Identical copies
+  // split the loads; keep on the always block stops synthesis merging them.
+  // rst[0]: UART, rst[1]: channel select, rst[2..3]: channel group 0..1.
+  wire [3:0] rst;
   genvar r;
   generate
-    for (r = 0; r < 2; r = r + 1) begin : rst_sync
+    for (r = 0; r < 4; r = r + 1) begin : rst_sync
       reg q;
       (* keep *) always @(posedge clk) q <= !rst_n;
       assign rst[r] = q;
@@ -71,42 +71,59 @@ module tt_um_innova_pwm (
 
   reg [3:0] sel;
   reg       have_sel;
-  // PWM counter: bits 8:1 step every other clock, so PWM stays at
-  // 100 MHz / 512 = 195 kHz with 256 duty steps.
-  reg [8:0] count;
 
   always @(posedge clk) begin
     if (rst[1]) begin
       have_sel <= 1'b0;
       sel      <= 4'd0;
-      count    <= 9'd0;
-    end else begin
-      count <= count + 9'd1;
-      if (rx_valid) begin
-        if (rx_data[7]) begin
-          sel      <= rx_data[3:0];
-          have_sel <= 1'b1;
-        end else if (have_sel) begin
-          have_sel <= 1'b0;
-        end
+    end else if (rx_valid) begin
+      if (rx_data[7]) begin
+        sel      <= rx_data[3:0];
+        have_sel <= 1'b1;
+      end else if (have_sel) begin
+        have_sel <= 1'b0;
       end
     end
   end
 
-  // Duty is stored as the 7 bits received; the 8-bit value is {d, d[6]}.
-  // Reset clears it through the write port: every channel is written with 0,
-  // which saves a reset gate on each of the 105 bits.
-  wire       duty_we = rx_valid && !rx_data[7] && have_sel;
-  wire [6:0] wdata   = rst[1] ? 7'd0 : rx_data[6:0];
+  wire duty_we = rx_valid && !rx_data[7] && have_sel;
 
+  // The channels are split into two groups (0-7, 8-14), each with its own
+  // PWM counter and write stage, so no counter or data bit drives all 15
+  // channels. keep stops synthesis merging the identical copies.
   wire [NUM_CH-1:0] pwm;
-  genvar d;
+  genvar g, d;
   generate
-    for (d = 0; d < NUM_CH; d = d + 1) begin : ch
-      reg [6:0] duty;
-      always @(posedge clk)
-        if (rst[1] || (duty_we && sel == d)) duty <= wdata;
-      assign pwm[d] = count[8:1] < {duty, duty[6]};
+    for (g = 0; g < 2; g = g + 1) begin : grp
+      // PWM counter: bits 8:1 step every other clock, so PWM stays at
+      // 100 MHz / 512 = 195 kHz with 256 duty steps.
+      reg [8:0] count;
+      (* keep *) always @(posedge clk) begin
+        if (rst[2 + g]) count <= 9'd0;
+        else count <= count + 9'd1;
+      end
+
+      // Write stage: a duty write lands one clock after its byte arrives.
+      // Reset clears duty through the same port: wclr writes 0 to every
+      // channel, which saves a reset gate on each of the duty bits.
+      reg       wclr;
+      reg       wen;
+      reg [3:0] wsel;
+      reg [6:0] wdata;
+      (* keep *) always @(posedge clk) begin
+        wclr  <= rst[2 + g];
+        wen   <= duty_we;
+        wsel  <= sel;
+        wdata <= rst[2 + g] ? 7'd0 : rx_data[6:0];
+      end
+
+      // Duty is stored as the 7 bits received; the 8-bit value is {d, d[6]}.
+      for (d = g * 8; d < (g == 0 ? 8 : NUM_CH); d = d + 1) begin : ch
+        reg [6:0] duty;
+        always @(posedge clk)
+          if (wclr || (wen && wsel == d)) duty <= wdata;
+        assign pwm[d] = count[8:1] < {duty, duty[6]};
+      end
     end
   endgenerate
 
