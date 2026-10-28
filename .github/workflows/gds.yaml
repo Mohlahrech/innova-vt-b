@@ -17,8 +17,6 @@ jobs:
         uses: TinyTapeout/tt-gds-action@ttsky26d
         with:
           pdk: sky130A
-          # Same LibreLane as the Innova platform, so both arms build with one flow.
-          librelane-version: '3.0.16'
 
   precheck:
     needs: gds
