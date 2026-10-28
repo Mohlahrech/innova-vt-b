@@ -29,34 +29,16 @@ module tt_um_innova_pwm (
   // Wide enough for the longest bit period (PRESCALE * 8 clocks), and no wider.
   localparam PRESCALE_WIDTH = $clog2(PRESCALE * 8 + 1);
 
-  // Every net below is kept to about ten loads or fewer. Past that the flow
-  // buffers it with weak delay cells, which miss the 0.75 ns slew limit at the
-  // slow corner. So the reset, the PWM counter and the duty write data are
-  // replicated per group of channels; keep on each always block stops synthesis
-  // merging the identical copies back together.
-  localparam GRP_CH  = 3;                // channels per group
-  localparam NUM_GRP = NUM_CH / GRP_CH;  // 5 groups
-
-  // Reset: rst_n is registered twice, through a small tree, so each copy drives
-  // one block. Reset takes effect, and releases, two clocks (20 ns) later.
-  // rst[0..14]: duty of channel 0..14, rst[15..19]: counter of group 0..4,
-  // rst[20]: UART, rst[21]: channel select.
-  localparam NUM_RST = NUM_CH + NUM_GRP + 2;
-  localparam RST_UART = NUM_CH + NUM_GRP;
-  localparam RST_CTRL = NUM_CH + NUM_GRP + 1;
-  localparam NUM_RST_A = 5;
-  wire [NUM_RST_A-1:0] rst_a;
-  wire [NUM_RST-1:0] rst;
+  // rst_n is registered so the synchronous resets load flops, not the input
+  // pad: reset takes effect, and releases, one clock later. Two identical
+  // copies split the loads; keep on the always block stops synthesis merging them.
+  // rst[0]: UART, rst[1]: channel select, PWM counter and duty.
+  wire [1:0] rst;
   genvar r;
   generate
-    for (r = 0; r < NUM_RST_A; r = r + 1) begin : rst_tree
+    for (r = 0; r < 2; r = r + 1) begin : rst_sync
       reg q;
       (* keep *) always @(posedge clk) q <= !rst_n;
-      assign rst_a[r] = q;
-    end
-    for (r = 0; r < NUM_RST; r = r + 1) begin : rst_sync
-      reg q;
-      (* keep *) always @(posedge clk) q <= rst_a[r % NUM_RST_A];
       assign rst[r] = q;
     end
   endgenerate
@@ -71,7 +53,7 @@ module tt_um_innova_pwm (
       .PRESCALE_WIDTH(PRESCALE_WIDTH)
   ) uart_inst (
       .clk(clk),
-      .rst(rst[RST_UART]),
+      .rst(rst[0]),
       .s_axis_tdata(rx_data),
       .s_axis_tvalid(rx_valid),
       .s_axis_tready(),
@@ -89,59 +71,42 @@ module tt_um_innova_pwm (
 
   reg [3:0] sel;
   reg       have_sel;
+  // PWM counter: bits 8:1 step every other clock, so PWM stays at
+  // 100 MHz / 512 = 195 kHz with 256 duty steps.
+  reg [8:0] count;
 
   always @(posedge clk) begin
-    if (rst[RST_CTRL]) begin
+    if (rst[1]) begin
       have_sel <= 1'b0;
       sel      <= 4'd0;
-    end else if (rx_valid) begin
-      if (rx_data[7]) begin
-        sel      <= rx_data[3:0];
-        have_sel <= 1'b1;
-      end else if (have_sel) begin
-        have_sel <= 1'b0;
+      count    <= 9'd0;
+    end else begin
+      count <= count + 9'd1;
+      if (rx_valid) begin
+        if (rx_data[7]) begin
+          sel      <= rx_data[3:0];
+          have_sel <= 1'b1;
+        end else if (have_sel) begin
+          have_sel <= 1'b0;
+        end
       end
     end
   end
 
-  wire duty_we = rx_valid && !rx_data[7] && have_sel;
+  // Duty is stored as the 7 bits received; the 8-bit value is {d, d[6]}.
+  // Reset clears it through the write port: every channel is written with 0,
+  // which saves a reset gate on each of the 105 bits.
+  wire       duty_we = rx_valid && !rx_data[7] && have_sel;
+  wire [6:0] wdata   = rst[1] ? 7'd0 : rx_data[6:0];
 
   wire [NUM_CH-1:0] pwm;
-  genvar g, c;
+  genvar d;
   generate
-    for (g = 0; g < NUM_GRP; g = g + 1) begin : grp
-      // PWM counter: bits 8:1 step every other clock, so PWM stays at
-      // 100 MHz / 512 = 195 kHz with 256 duty steps.
-      reg [8:0] count;
-      (* keep *) always @(posedge clk) begin
-        if (rst[NUM_CH + g]) count <= 9'd0;
-        else count <= count + 9'd1;
-      end
-
-      // Write stage: the byte and select are copied per group, then decoded
-      // into a registered enable per channel, so a duty write lands two clocks
-      // after its byte arrives. rx_data holds the byte until the next one, so
-      // wdata is still that byte when the enable fires.
-      reg       wen;
-      reg [3:0] wsel;
-      reg [6:0] wdata;
-      (* keep *) always @(posedge clk) begin
-        wen   <= duty_we;
-        wsel  <= sel;
-        wdata <= rx_data[6:0];
-      end
-
-      for (c = 0; c < GRP_CH; c = c + 1) begin : ch
-        localparam D = g * GRP_CH + c;
-        reg [7:0] duty;
-        reg       we;
-        always @(posedge clk) begin
-          we <= wen && wsel == D;
-          if (rst[D]) duty <= 8'd0;
-          else if (we) duty <= {wdata, wdata[6]};
-        end
-        assign pwm[D] = count[8:1] < duty;
-      end
+    for (d = 0; d < NUM_CH; d = d + 1) begin : ch
+      reg [6:0] duty;
+      always @(posedge clk)
+        if (rst[1] || (duty_we && sel == d)) duty <= wdata;
+      assign pwm[d] = count[8:1] < {duty, duty[6]};
     end
   endgenerate
 
