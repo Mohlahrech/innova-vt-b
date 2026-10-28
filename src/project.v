@@ -29,17 +29,33 @@ module tt_um_innova_pwm (
   // Wide enough for the longest bit period (PRESCALE * 8 clocks), and no wider.
   localparam PRESCALE_WIDTH = $clog2(PRESCALE * 8 + 1);
 
-  // rst_n is registered so the ~190 synchronous resets load flops, not the input
-  // pad: reset takes effect, and releases, one clock later. Four identical copies
-  // each drive about a quarter of the loads, which keeps the fanout tree short
-  // enough for 10 ns. keep on the always block stops synthesis merging them.
-  // rst[0]: UART, rst[1]: control and channels 0-3, rst[2]: 4-9, rst[3]: 10-14.
-  wire [3:0] rst;
+  // Every net below is kept to about ten loads or fewer. Past that the flow
+  // buffers it with weak delay cells, which miss the 0.75 ns slew limit at the
+  // slow corner. So the reset, the PWM counter and the duty write data are
+  // replicated per group of channels; keep on each always block stops synthesis
+  // merging the identical copies back together.
+  localparam GRP_CH  = 3;                // channels per group
+  localparam NUM_GRP = NUM_CH / GRP_CH;  // 5 groups
+
+  // Reset: rst_n is registered twice, through a small tree, so each copy drives
+  // one block. Reset takes effect, and releases, two clocks (20 ns) later.
+  // rst[0..14]: duty of channel 0..14, rst[15..19]: counter of group 0..4,
+  // rst[20]: UART, rst[21]: channel select.
+  localparam NUM_RST = NUM_CH + NUM_GRP + 2;
+  localparam RST_UART = NUM_CH + NUM_GRP;
+  localparam RST_CTRL = NUM_CH + NUM_GRP + 1;
+  wire [2:0] rst_a;
+  wire [NUM_RST-1:0] rst;
   genvar r;
   generate
-    for (r = 0; r < 4; r = r + 1) begin : rst_sync
+    for (r = 0; r < 3; r = r + 1) begin : rst_tree
       reg q;
       (* keep *) always @(posedge clk) q <= !rst_n;
+      assign rst_a[r] = q;
+    end
+    for (r = 0; r < NUM_RST; r = r + 1) begin : rst_sync
+      reg q;
+      (* keep *) always @(posedge clk) q <= rst_a[r % 3];
       assign rst[r] = q;
     end
   endgenerate
@@ -54,7 +70,7 @@ module tt_um_innova_pwm (
       .PRESCALE_WIDTH(PRESCALE_WIDTH)
   ) uart_inst (
       .clk(clk),
-      .rst(rst[0]),
+      .rst(rst[RST_UART]),
       .s_axis_tdata(rx_data),
       .s_axis_tvalid(rx_valid),
       .s_axis_tready(),
@@ -72,41 +88,54 @@ module tt_um_innova_pwm (
 
   reg [3:0] sel;
   reg       have_sel;
-  reg [7:0] counter;
-  reg       pwm_tick;  // counter steps every other clock, so PWM stays at 100 MHz / 512 = 195 kHz
-
-  wire [NUM_CH-1:0] pwm;
-  wire duty_we = rx_valid && !rx_data[7] && have_sel && sel < NUM_CH;
 
   always @(posedge clk) begin
-    if (rst[1]) begin
+    if (rst[RST_CTRL]) begin
       have_sel <= 1'b0;
       sel      <= 4'd0;
-      counter  <= 8'd0;
-      pwm_tick <= 1'b0;
-    end else begin
-      pwm_tick <= !pwm_tick;
-      if (pwm_tick) counter <= counter + 8'd1;
-      if (rx_valid) begin
-        if (rx_data[7]) begin
-          sel      <= rx_data[3:0];
-          have_sel <= 1'b1;
-        end else if (have_sel) begin
-          have_sel <= 1'b0;
-        end
+    end else if (rx_valid) begin
+      if (rx_data[7]) begin
+        sel      <= rx_data[3:0];
+        have_sel <= 1'b1;
+      end else if (have_sel) begin
+        have_sel <= 1'b0;
       end
     end
   end
 
-  genvar d;
+  wire duty_we = rx_valid && !rx_data[7] && have_sel;
+
+  wire [NUM_CH-1:0] pwm;
+  genvar g, c;
   generate
-    for (d = 0; d < NUM_CH; d = d + 1) begin : ch
-      reg [7:0] duty;
-      always @(posedge clk) begin
-        if (rst[d < 4 ? 1 : d < 10 ? 2 : 3]) duty <= 8'd0;
-        else if (duty_we && sel == d) duty <= {rx_data[6:0], rx_data[6]};
+    for (g = 0; g < NUM_GRP; g = g + 1) begin : grp
+      // PWM counter: bits 8:1 step every other clock, so PWM stays at
+      // 100 MHz / 512 = 195 kHz with 256 duty steps.
+      reg [8:0] count;
+      (* keep *) always @(posedge clk) begin
+        if (rst[NUM_CH + g]) count <= 9'd0;
+        else count <= count + 9'd1;
       end
-      assign pwm[d] = counter < duty;
+
+      // Write stage: a duty write lands one clock after its byte arrives.
+      reg       wen;
+      reg [3:0] wsel;
+      reg [6:0] wdata;
+      (* keep *) always @(posedge clk) begin
+        wen   <= duty_we;
+        wsel  <= sel;
+        wdata <= rx_data[6:0];
+      end
+
+      for (c = 0; c < GRP_CH; c = c + 1) begin : ch
+        localparam D = g * GRP_CH + c;
+        reg [7:0] duty;
+        always @(posedge clk) begin
+          if (rst[D]) duty <= 8'd0;
+          else if (wen && wsel == D) duty <= {wdata, wdata[6]};
+        end
+        assign pwm[D] = count[8:1] < duty;
+      end
     end
   endgenerate
 
