@@ -44,18 +44,19 @@ module tt_um_innova_pwm (
   localparam NUM_RST = NUM_CH + NUM_GRP + 2;
   localparam RST_UART = NUM_CH + NUM_GRP;
   localparam RST_CTRL = NUM_CH + NUM_GRP + 1;
-  wire [2:0] rst_a;
+  localparam NUM_RST_A = 5;
+  wire [NUM_RST_A-1:0] rst_a;
   wire [NUM_RST-1:0] rst;
   genvar r;
   generate
-    for (r = 0; r < 3; r = r + 1) begin : rst_tree
+    for (r = 0; r < NUM_RST_A; r = r + 1) begin : rst_tree
       reg q;
       (* keep *) always @(posedge clk) q <= !rst_n;
       assign rst_a[r] = q;
     end
     for (r = 0; r < NUM_RST; r = r + 1) begin : rst_sync
       reg q;
-      (* keep *) always @(posedge clk) q <= rst_a[r % 3];
+      (* keep *) always @(posedge clk) q <= rst_a[r % NUM_RST_A];
       assign rst[r] = q;
     end
   endgenerate
@@ -117,7 +118,10 @@ module tt_um_innova_pwm (
         else count <= count + 9'd1;
       end
 
-      // Write stage: a duty write lands one clock after its byte arrives.
+      // Write stage: the byte and select are copied per group, then decoded
+      // into a registered enable per channel, so a duty write lands two clocks
+      // after its byte arrives. rx_data holds the byte until the next one, so
+      // wdata is still that byte when the enable fires.
       reg       wen;
       reg [3:0] wsel;
       reg [6:0] wdata;
@@ -130,9 +134,11 @@ module tt_um_innova_pwm (
       for (c = 0; c < GRP_CH; c = c + 1) begin : ch
         localparam D = g * GRP_CH + c;
         reg [7:0] duty;
+        reg       we;
         always @(posedge clk) begin
+          we <= wen && wsel == D;
           if (rst[D]) duty <= 8'd0;
-          else if (wen && wsel == D) duty <= {wdata, wdata[6]};
+          else if (we) duty <= {wdata, wdata[6]};
         end
         assign pwm[D] = count[8:1] < duty;
       end
