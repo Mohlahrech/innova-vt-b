@@ -29,12 +29,10 @@ module tt_um_innova_pwm (
   // Wide enough for the longest bit period (PRESCALE * 8 clocks), and no wider.
   localparam PRESCALE_WIDTH = $clog2(PRESCALE * 8 + 1);
 
-  // rst_n is registered so the ~190 synchronous resets load flops, not the input
-  // pad: reset takes effect, and releases, one clock later. Four identical copies
-  // (kept apart in synthesis) each drive a quarter of the loads, which keeps the
-  // fanout tree short enough for 10 ns. [0] UART, [1] control, [2]/[3] duty 0-7/8-14.
-  (* keep *) reg [3:0] rst;
-  always @(posedge clk) rst <= {4{!rst_n}};
+  // rst_n is registered so the ~190 synchronous resets load a flop, not the input
+  // pad: reset takes effect, and releases, one clock later.
+  reg rst;
+  always @(posedge clk) rst <= !rst_n;
 
   wire [7:0] rx_data;
   wire       rx_valid;
@@ -46,7 +44,7 @@ module tt_um_innova_pwm (
       .PRESCALE_WIDTH(PRESCALE_WIDTH)
   ) uart_inst (
       .clk(clk),
-      .rst(rst[0]),
+      .rst(rst),
       .s_axis_tdata(rx_data),
       .s_axis_tvalid(rx_valid),
       .s_axis_tready(),
@@ -71,7 +69,7 @@ module tt_um_innova_pwm (
   wire duty_we = rx_valid && !rx_data[7] && have_sel && sel < NUM_CH;
 
   always @(posedge clk) begin
-    if (rst[1]) begin
+    if (rst) begin
       have_sel <= 1'b0;
       sel      <= 4'd0;
       counter  <= 8'd0;
@@ -95,7 +93,7 @@ module tt_um_innova_pwm (
     for (d = 0; d < NUM_CH; d = d + 1) begin : ch
       reg [7:0] duty;
       always @(posedge clk) begin
-        if (rst[d < 8 ? 2 : 3]) duty <= 8'd0;
+        if (rst) duty <= 8'd0;
         else if (duty_we && sel == d) duty <= {rx_data[6:0], rx_data[6]};
       end
       assign pwm[d] = counter < duty;
