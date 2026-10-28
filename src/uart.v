@@ -31,7 +31,8 @@ THE SOFTWARE.
  */
 module uart #
 (
-    parameter DATA_WIDTH = 8
+    parameter DATA_WIDTH = 8,
+    parameter PRESCALE_WIDTH = 19
 )
 (
     input  wire                   clk,
@@ -73,7 +74,8 @@ module uart #
 );
 
 uart_tx #(
-    .DATA_WIDTH(DATA_WIDTH)
+    .DATA_WIDTH(DATA_WIDTH),
+    .PRESCALE_WIDTH(PRESCALE_WIDTH)
 )
 uart_tx_inst (
     .clk(clk),
@@ -91,7 +93,8 @@ uart_tx_inst (
 );
 
 uart_rx #(
-    .DATA_WIDTH(DATA_WIDTH)
+    .DATA_WIDTH(DATA_WIDTH),
+    .PRESCALE_WIDTH(PRESCALE_WIDTH)
 )
 uart_rx_inst (
     .clk(clk),

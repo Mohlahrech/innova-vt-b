@@ -31,7 +31,9 @@ THE SOFTWARE.
  */
 module uart_tx #
 (
-    parameter DATA_WIDTH = 8
+    parameter DATA_WIDTH = 8,
+    // Bit-period counter width; must hold prescale*8. 19 covers any 16-bit prescale.
+    parameter PRESCALE_WIDTH = 19
 )
 (
     input  wire                   clk,
@@ -67,7 +69,7 @@ reg txd_reg = 1;
 reg busy_reg = 0;
 
 reg [DATA_WIDTH:0] data_reg = 0;
-reg [18:0] prescale_reg = 0;
+reg [PRESCALE_WIDTH-1:0] prescale_reg = 0;
 reg [3:0] bit_cnt = 0;
 
 assign s_axis_tready = s_axis_tready_reg;

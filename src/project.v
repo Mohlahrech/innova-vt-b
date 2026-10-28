@@ -26,6 +26,8 @@ module tt_um_innova_pwm (
   localparam BAUD     = 115_200;
   localparam [15:0] PRESCALE = CLK_HZ / (BAUD * 8);
   localparam NUM_CH   = 15;
+  // Wide enough for the longest bit period (PRESCALE * 8 clocks), and no wider.
+  localparam PRESCALE_WIDTH = $clog2(PRESCALE * 8 + 1);
 
   wire rst = !rst_n;
 
@@ -34,7 +36,10 @@ module tt_um_innova_pwm (
   wire       txd;
 
   // Echo: every received byte goes straight back out.
-  uart #(.DATA_WIDTH(8)) uart_inst (
+  uart #(
+      .DATA_WIDTH(8),
+      .PRESCALE_WIDTH(PRESCALE_WIDTH)
+  ) uart_inst (
       .clk(clk),
       .rst(rst),
       .s_axis_tdata(rx_data),
